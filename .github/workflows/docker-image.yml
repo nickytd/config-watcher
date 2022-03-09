@@ -6,8 +6,6 @@ on:
       - 'main'
     tags:
       - '*.*.*'
-    paths:
-      - 'config-watcher/**'
   pull_request:
     branches:
       - 'main'
