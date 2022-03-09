@@ -131,9 +131,16 @@ func getSha256() string {
 	}
 	b := strings.Builder{}
 	for _, f := range dir {
-		if f.IsDir() {
+		fi, err := os.Stat(watchedDir + "/" + f.Name())
+		if err != nil {
+			level.Error(logger).Log("error", err.Error())
 			continue
 		}
+		if fi.IsDir() {
+			level.Debug(logger).Log("skipping folder", fi.Name())
+			continue
+		}
+
 		h := sha256.New()
 		t, err := os.Open(watchedDir + "/" + f.Name())
 		if err != nil {
