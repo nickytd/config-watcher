@@ -1,4 +1,4 @@
-FROM golang:1.17 as golang
+FROM golang:1.18 as golang
 
 ADD . $GOPATH/src/config-watcher/
 
