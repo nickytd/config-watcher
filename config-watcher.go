@@ -1,33 +1,40 @@
 package main
 
 import (
-	"crypto/sha256"
-	"flag"
+	"context"
 	"fmt"
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
-	"io"
-	"io/ioutil"
+	"github.com/nickytd/config-watcher/metrics"
+	"github.com/nickytd/config-watcher/proc"
+	"github.com/nickytd/config-watcher/watcher"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
-	"time"
 )
 
 var (
-	//utility logger supporting log levels
-	logger = log.NewLogfmtLogger(os.Stdout)
-
-	//enable debug logs
-	debug bool
 
 	// the target process command line that can be found under /proc/[pid]/cmdline
 	cmdLine string
 
 	// watched directory for configuration changes
 	watchedDir string
+
+	//log level flag
+	debug bool
+
+	//command line parametes handler
+	rootCmd = &cobra.Command{
+		Use:  "config-watcher",
+		Long: "A simple tool noticing changes in files in a watched directory.",
+	}
+
+	//logger
+	logger *zap.Logger
 )
 
 // config-watcher calculates hashes of the files in the watchedDir and
@@ -38,20 +45,44 @@ var (
 // with the target process in the pod
 
 func main() {
+	rootCmd.Flags().StringVarP(
+		&cmdLine,
+		"cmdline",
+		"c",
+		"/fluent-bit/bin/fluent-bit",
+		"target process cmdline, example: /fluent-bit/bin/fluent-bit",
+	)
 
-	flag.BoolVar(&debug, "debug", false, "enable debug logs")
-	flag.StringVar(&cmdLine, "cmdline", "/fluent-bit/bin/fluent-bit", "target process cmdline, example: /fluent-bit/bin/fluent-bit")
-	flag.StringVar(&watchedDir, "watchedDir", "/fluent-bit/etc", "watched dir, example: /fluent-bit/etc ")
-	flag.Parse()
+	rootCmd.Flags().StringVarP(
+		&watchedDir,
+		"watchedDir",
+		"w",
+		"/fluent-bit/etc",
+		"watched dir, example: /fluent-bit/etc ",
+	)
 
-	if debug {
-		logger = level.NewFilter(logger, level.AllowDebug())
-	} else {
-		logger = level.NewFilter(logger, level.AllowInfo())
+	rootCmd.Flags().BoolVarP(
+		&debug,
+		"debug",
+		"d",
+		false,
+		"enables debug log level",
+	)
+
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
 
-	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
-	level.Debug(logger).Log("msg", "starting")
+	if debug {
+		logger, _ = zap.NewDevelopment()
+	} else {
+		logger, _ = zap.NewProduction()
+	}
+
+	log := logger.Named("main")
+	log.Info("starting")
+
 	watchedDir = strings.TrimSuffix(watchedDir, "/")
 
 	sigs := make(chan os.Signal, 1)
@@ -60,102 +91,40 @@ func main() {
 
 	go func() {
 		sig := <-sigs
-		level.Debug(logger).Log("receivedSignal", sig)
+		log.Info(
+			"signal received",
+			zap.String("signal", sig.String()),
+		)
 		done <- true
 	}()
 
-	go func() {
-		hash := getSha256()
-		for {
-			level.Debug(logger).Log("hash", hash)
-			if hash != getSha256() {
-				pid := getTargetProcessPID()
-				if pid != nil {
-					level.Debug(logger).Log("targetProcessId", pid.Pid)
-					if p, err := os.FindProcess(pid.Pid); err != nil {
-						level.Error(logger).Log("error", err.Error())
-					} else {
-						if err := p.Signal(syscall.SIGTERM); err != nil {
-							level.Error(logger).Log("error", err.Error())
-						} else {
-							hash = getSha256()
-							level.Info(logger).Log("hash", hash)
-						}
-					}
-				} else {
-					level.Debug(logger).Log("msg", "process not found")
-				}
-			}
-			time.Sleep(time.Second * 5)
-		}
-	}()
+	c, cancel := context.WithCancel(context.Background())
+	ctx := context.WithValue(c, "logger", logger)
 
-	<-done
-	level.Info(logger).Log("msg", "exiting")
+	http.Handle("/metrics", promhttp.Handler())
+	go http.ListenAndServe(":8888", nil)
 
-}
-
-func getTargetProcessPID() *os.Process {
-
-	dir, err := os.ReadDir("/proc")
-	if err != nil {
-		level.Error(logger).Log("error", err.Error())
-		os.Exit(-1)
-	}
-
-	for _, f := range dir {
-		if f.IsDir() {
-			if pid, err := strconv.Atoi(f.Name()); err == nil {
-				if content, err := ioutil.ReadFile("/proc/" + f.Name() + "/cmdline"); err != nil {
-					level.Debug(logger).Log("error", err.Error())
-					continue
-				} else {
-					if strings.Contains(string(content), cmdLine) {
-						return &os.Process{
-							Pid: pid,
-						}
-					} else {
-						level.Debug(logger).Log("cmdline", content)
-					}
-				}
+	hash := watcher.RunTotalHashCalc(ctx, watchedDir)
+	currentHash := <-hash
+	for {
+		select {
+		case <-done:
+			cancel()
+			log.Info("exiting")
+			os.Exit(0)
+		case h := <-hash:
+			if currentHash != h {
+				log.Info(
+					"total hash changed",
+					zap.String("old hash", currentHash),
+					zap.String("new hash", h),
+				)
+				currentHash = h
+				metrics.IncreaseTotalHashUpdates()
+				metrics.ResetFileHash()
+				go proc.TerminateProcess(ctx, cmdLine)
 			}
 		}
 	}
-	return nil
-}
 
-func getSha256() string {
-	dir, err := os.ReadDir(watchedDir)
-	if err != nil {
-		level.Error(logger).Log("error", err.Error())
-	}
-	b := strings.Builder{}
-	for _, f := range dir {
-		fi, err := os.Stat(watchedDir + "/" + f.Name())
-		if err != nil {
-			level.Error(logger).Log("error", err.Error())
-			continue
-		}
-		if fi.IsDir() {
-			level.Debug(logger).Log("skipping folder", fi.Name())
-			continue
-		}
-
-		h := sha256.New()
-		t, err := os.Open(watchedDir + "/" + f.Name())
-		if err != nil {
-			level.Error(logger).Log("error", err.Error())
-			continue
-		}
-		if _, err := io.Copy(h, t); err != nil {
-			level.Error(logger).Log("error", err.Error())
-			continue
-		}
-		t.Close()
-		s := fmt.Sprintf("%x", h.Sum(nil))
-		level.Debug(logger).Log(f.Name(), fmt.Sprintf("%x", h.Sum(nil)))
-		b.Grow(len(s))
-		b.WriteString(s)
-	}
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(b.String())))
 }
