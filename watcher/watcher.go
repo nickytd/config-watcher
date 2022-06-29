@@ -50,7 +50,6 @@ func getTotalHash(watchedDir string) string {
 	// synchronizing map access
 	var mapMutex = sync.RWMutex{}
 	// synchronization on parallel calculation of files hashes
-	// synchronization on parallel calculation of files hashes
 	var wg = sync.WaitGroup{}
 	var dir []os.DirEntry
 	var err error

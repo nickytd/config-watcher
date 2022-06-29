@@ -3,12 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
-
 	"github.com/nickytd/config-watcher/metrics"
 	"github.com/nickytd/config-watcher/proc"
 	"github.com/nickytd/config-watcher/watcher"
@@ -16,6 +10,11 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 )
 
 var (
