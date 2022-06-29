@@ -3,17 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
 	"github.com/nickytd/config-watcher/metrics"
 	"github.com/nickytd/config-watcher/proc"
 	"github.com/nickytd/config-watcher/watcher"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-	"net/http"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
@@ -77,7 +79,9 @@ func main() {
 	if debug {
 		logger, _ = zap.NewDevelopment()
 	} else {
-		logger, _ = zap.NewProduction()
+		config := zap.NewProductionConfig()
+		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+		logger, _ = config.Build()
 	}
 
 	log := logger.Named("main")

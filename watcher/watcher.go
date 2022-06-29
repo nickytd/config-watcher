@@ -49,11 +49,13 @@ func getTotalHash(watchedDir string) string {
 	var filesMap = map[string]string{}
 	// synchronizing map access
 	var mapMutex = sync.RWMutex{}
-	// waiting for calculation of files hashes to finish
+	// synchronization on parallel calculation of files hashes
+	// synchronization on parallel calculation of files hashes
 	var wg = sync.WaitGroup{}
+	var dir []os.DirEntry
+	var err error
 
-	dir, err := os.ReadDir(watchedDir)
-	if err != nil {
+	if dir, err = os.ReadDir(watchedDir); err != nil {
 		log.Error(
 			"error reading watched dir",
 			zap.Error(err),
@@ -73,6 +75,7 @@ func getTotalHash(watchedDir string) string {
 		}(watchedDir + "/" + f.Name())
 	}
 
+	//waiting for hash calculations to finish
 	wg.Wait()
 
 	mapMutex.RLock()
@@ -103,7 +106,10 @@ func getTotalHash(watchedDir string) string {
 
 func getSha256(file string) (string, error) {
 
-	log.Debug("checking", zap.String("name", file))
+	log.Debug(
+		"checking",
+		zap.String("name", file),
+	)
 	stat, err := os.Stat(file)
 	if err != nil {
 		log.Error(
