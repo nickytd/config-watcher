@@ -2,7 +2,6 @@ package main
 
 import (
 	"config-watcher/metrics"
-	"config-watcher/proc"
 	"config-watcher/watcher"
 	"context"
 	"fmt"
@@ -90,9 +89,9 @@ func main() {
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	}
 
-	logger, _ = config.Build()
-	log := logger.Named("main")
-	log.Info("starting")
+	l, _ := config.Build()
+	logger = l.Named("main")
+	logger.Info("starting")
 
 	watchedDir = strings.TrimSuffix(watchedDir, "/")
 
@@ -102,7 +101,7 @@ func main() {
 
 	go func() {
 		sig := <-sigs
-		log.Info(
+		logger.Info(
 			"signal received",
 			zap.String("signal", sig.String()),
 		)
@@ -116,7 +115,7 @@ func main() {
 		http.Handle("/metrics", promhttp.Handler())
 		err = http.ListenAndServe(":8888", nil)
 		if err != nil {
-			log.Error(err.Error())
+			logger.Error(err.Error())
 			os.Exit(-1)
 		}
 	}()
@@ -125,25 +124,24 @@ func main() {
 	currentHash := <-hash
 
 	//Shall start the processes and maintain the PID
-	cmd = startChildProcess(cmdLine)
+	cmd = generateChildProcessCommand(cmdLine)
 	if err = cmd.Start(); err != nil {
-		log.Error(err.Error())
+		logger.Error(err.Error())
 		os.Exit(-1)
 	}
 
-	log.Info("process started",
-		zap.Int("pid", cmd.Process.Pid),
-		zap.String("state", cmd.ProcessState.String()))
+	logger.Info("process started",
+		zap.Int("pid", cmd.Process.Pid))
 
 	for {
 		select {
 		case <-done:
 			cancel()
-			log.Info("exiting")
+			logger.Info("exiting")
 			os.Exit(0)
 		case h := <-hash:
 			if currentHash != h {
-				log.Info(
+				logger.Info(
 					"total hash changed",
 					zap.String("old hash", currentHash),
 					zap.String("new hash", h),
@@ -151,11 +149,11 @@ func main() {
 				currentHash = h
 				metrics.IncreaseTotalHashUpdates()
 				metrics.ResetFileHash()
-				cmd, err = proc.RestartProcesses(ctx, cmd)
+				cmd, err = restartChildProcesses()
 				if err = cmd.Start(); err != nil {
-					log.Error(err.Error())
+					logger.Error(err.Error())
 				}
-				log.Info("process started",
+				logger.Info("process started",
 					zap.Int("pid", cmd.Process.Pid))
 				metrics.ProcssesRestarts()
 			}
@@ -164,10 +162,30 @@ func main() {
 
 }
 
-func startChildProcess(cmdLine string) *exec.Cmd {
+func generateChildProcessCommand(cmdLine string) *exec.Cmd {
 	cmd := exec.Command(cmdLine, "-c", "/fluent-bit/etc/fluent-bit.conf")
 	cmd.Env = os.Environ()
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	return cmd
+}
+
+func restartChildProcesses() (*exec.Cmd, error) {
+
+	if cmd == nil {
+		logger.Error("child process is nil")
+		return nil, fmt.Errorf("invalid child processes")
+	}
+
+	pid := cmd.ProcessState.Pid()
+
+	logger.Info("current process",
+		zap.Int("pid", pid))
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		return nil, err
+	}
+
+	return generateChildProcessCommand(cmdLine), nil
+
 }
