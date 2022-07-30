@@ -177,10 +177,8 @@ func restartChildProcesses() (*exec.Cmd, error) {
 		return nil, fmt.Errorf("invalid child processes")
 	}
 
-	pid := cmd.ProcessState.Pid()
-
 	logger.Info("current process",
-		zap.Int("pid", pid))
+		zap.Int("pid", cmd.Process.Pid))
 
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		return nil, err
