@@ -178,7 +178,11 @@ func stopChildProcesses() error {
 	logger.Info("sending TERM signal",
 		zap.Int("pid", cmd.Process.Pid))
 
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	if err = cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		return err
+	}
+
+	if err = cmd.Wait(); err != nil {
 		return err
 	}
 
