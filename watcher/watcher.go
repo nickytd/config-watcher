@@ -1,10 +1,10 @@
 package watcher
 
 import (
+	"config-watcher/metrics"
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"github.com/nickytd/config-watcher/metrics"
 	"go.uber.org/zap"
 	"io"
 	"os"
@@ -18,14 +18,11 @@ var log *zap.Logger
 
 func RunTotalHashCalc(ctx context.Context, watchedDir string) <-chan string {
 
-	if l := ctx.Value("logger"); l != nil {
-		log = l.(*zap.Logger).Named("watcher")
-	} else {
-		log = zap.NewNop()
-	}
+	l := ctx.Value("logger")
+	log = l.(*zap.Logger).Named("watcher")
 
 	result := make(chan string, 2)
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 	result <- getTotalHash(watchedDir)
 
 	go func() {

@@ -1,23 +1,25 @@
 package main
 
 import (
+	"config-watcher/metrics"
+	"config-watcher/proc"
+	"config-watcher/watcher"
 	"context"
 	"fmt"
-	"github.com/nickytd/config-watcher/metrics"
-	"github.com/nickytd/config-watcher/proc"
-	"github.com/nickytd/config-watcher/watcher"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
 )
 
 var (
+	config zap.Config
 
 	// the target process command line that can be found under /proc/[pid]/cmdline
 	cmdLine string
@@ -28,7 +30,7 @@ var (
 	//log level flag
 	debug bool
 
-	//command line parametes handler
+	//command line parameters handler
 	rootCmd = &cobra.Command{
 		Use:  "config-watcher",
 		Long: "A simple tool noticing changes in files in a watched directory.",
@@ -36,6 +38,12 @@ var (
 
 	//logger
 	logger *zap.Logger
+
+	// watched child process
+	cmd *exec.Cmd
+
+	// error
+	err error
 )
 
 // config-watcher calculates hashes of the files in the watchedDir and
@@ -76,13 +84,13 @@ func main() {
 	}
 
 	if debug {
-		logger, _ = zap.NewDevelopment()
+		config = zap.NewDevelopmentConfig()
 	} else {
-		config := zap.NewProductionConfig()
+		config = zap.NewProductionConfig()
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-		logger, _ = config.Build()
 	}
 
+	logger, _ = config.Build()
 	log := logger.Named("main")
 	log.Info("starting")
 
@@ -104,11 +112,29 @@ func main() {
 	c, cancel := context.WithCancel(context.Background())
 	ctx := context.WithValue(c, "logger", logger)
 
-	http.Handle("/metrics", promhttp.Handler())
-	go http.ListenAndServe(":8888", nil)
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		err = http.ListenAndServe(":8888", nil)
+		if err != nil {
+			log.Error(err.Error())
+			os.Exit(-1)
+		}
+	}()
 
 	hash := watcher.RunTotalHashCalc(ctx, watchedDir)
 	currentHash := <-hash
+
+	//Shall start the processes and maintain the PID
+	cmd = startChildProcess(cmdLine)
+	if err = cmd.Start(); err != nil {
+		log.Error(err.Error())
+		os.Exit(-1)
+	}
+
+	log.Info("process started",
+		zap.Int("pid", cmd.Process.Pid),
+		zap.String("state", cmd.ProcessState.String()))
+
 	for {
 		select {
 		case <-done:
@@ -125,9 +151,23 @@ func main() {
 				currentHash = h
 				metrics.IncreaseTotalHashUpdates()
 				metrics.ResetFileHash()
-				go proc.TerminateProcess(ctx, cmdLine)
+				cmd, err = proc.RestartProcesses(ctx, cmd)
+				if err = cmd.Start(); err != nil {
+					log.Error(err.Error())
+				}
+				log.Info("process started",
+					zap.Int("pid", cmd.Process.Pid))
+				metrics.ProcssesRestarts()
 			}
 		}
 	}
 
+}
+
+func startChildProcess(cmdLine string) *exec.Cmd {
+	cmd := exec.Command(cmdLine, "-c", "/fluent-bit/etc/fluent-bit.conf")
+	cmd.Env = os.Environ()
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	return cmd
 }

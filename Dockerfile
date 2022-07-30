@@ -1,10 +1,10 @@
-FROM golang:1.18.3 as golang
+FROM golang:1.18.4 as golang
 
-ADD . $GOPATH/src/config-watcher/
+WORKDIR $GOPATH/src/
+ADD . .
+RUN go mod tidy
+RUN CGO_ENABLED=0 go build -o config-watcher .
 
-WORKDIR $GOPATH/src/config-watcher/
-RUN go mod tidy && CGO_ENABLED=0 go build -o config-watcher .
-
-FROM scratch
-COPY --from=golang /go/src/config-watcher/config-watcher /
+FROM fluent/fluent-bit:1.9.6
+COPY --from=golang /go/src/config-watcher /
 ENTRYPOINT ["/config-watcher"]

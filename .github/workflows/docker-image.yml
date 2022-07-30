@@ -23,7 +23,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v3
         with:
-          images: nickytd/config-watcher
+          images: nickytd/fluent-bit
           flavor: |
             latest=true
           tags: |

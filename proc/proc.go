@@ -2,83 +2,33 @@ package proc
 
 import (
 	"context"
+	"fmt"
 	"go.uber.org/zap"
-	"io/ioutil"
-	"os"
-	"strconv"
-	"strings"
+	"os/exec"
 	"syscall"
 )
 
 var log *zap.Logger
 
-func getTargetProcessPID(cmdLine string) *os.Process {
+func RestartProcesses(ctx context.Context, cmd *exec.Cmd) (*exec.Cmd, error) {
+	l := ctx.Value("logger")
+	log = l.(*zap.Logger).Named("proc")
 
-	dir, err := os.ReadDir("/proc")
-	if err != nil {
-		log.Error(
-			"error reading proc",
-			zap.Error(err),
-		)
+	if cmd == nil {
+		log.Error("child process is nil")
+		return nil, fmt.Errorf("invalid child processes")
 	}
 
-	for _, f := range dir {
-		if f.IsDir() {
-			if pid, err := strconv.Atoi(f.Name()); err == nil {
-				if content, err := ioutil.ReadFile("/proc/" + f.Name() + "/cmdline"); err != nil {
-					log.Error(
-						"error reading proc",
-						zap.Error(err),
-					)
-					continue
-				} else {
-					if strings.Contains(string(content), cmdLine) {
-						return &os.Process{
-							Pid: pid,
-						}
-					} else {
-						log.Debug(
-							"reading proc.",
-							zap.String("cmdline", cmdLine),
-						)
-					}
-				}
-			}
-		}
-	}
-	return nil
-}
+	pid := cmd.ProcessState.Pid()
 
-func TerminateProcess(ctx context.Context, cmdLine string) {
-	if l := ctx.Value("logger"); l != nil {
-		log = l.(*zap.Logger).Named("proc")
-	} else {
-		log = zap.NewNop()
-	}
-	pid := getTargetProcessPID(cmdLine)
+	log.Info("current process",
+		zap.Int("pid", pid))
 
-	if pid != nil {
-		log.Debug(
-			"found process",
-			zap.Int("pid", pid.Pid),
-		)
-		if p, err := os.FindProcess(pid.Pid); err != nil {
-			log.Error(
-				"cannot find pricess",
-				zap.Int("pid", pid.Pid),
-			)
-		} else {
-			if err := p.Signal(syscall.SIGTERM); err != nil {
-				log.Error(
-					"error sedning TERM signal",
-					zap.Int("pid", pid.Pid),
-				)
-			}
-		}
-	} else {
-		log.Debug(
-			"process not found",
-			zap.String("cmdline", cmdLine),
-		)
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		return nil, err
 	}
+
+	cmdLine := cmd.Path
+	return exec.Command(cmdLine), nil
+
 }

@@ -1,4 +1,4 @@
-module github.com/nickytd/config-watcher
+module config-watcher
 
 go 1.18
 
