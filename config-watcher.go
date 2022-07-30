@@ -124,7 +124,10 @@ func main() {
 	currentHash := <-hash
 
 	//Shall start the processes and maintain the PID
-	cmd = generateChildProcessCommand(cmdLine)
+	cmd = exec.Command(cmdLine, "-c", "/fluent-bit/etc/fluent-bit.conf")
+	cmd.Env = os.Environ()
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
 	if err = cmd.Start(); err != nil {
 		logger.Error(err.Error())
 		os.Exit(-1)
@@ -149,9 +152,12 @@ func main() {
 				currentHash = h
 				metrics.IncreaseTotalHashUpdates()
 				metrics.ResetFileHash()
-				cmd, err = restartChildProcesses()
-				if err = cmd.Start(); err != nil {
+				if err = stopChildProcesses(); err != nil {
 					logger.Error(err.Error())
+				} else {
+					if err = cmd.Start(); err != nil {
+						logger.Error(err.Error())
+					}
 				}
 				logger.Info("process started",
 					zap.Int("pid", cmd.Process.Pid))
@@ -162,28 +168,20 @@ func main() {
 
 }
 
-func generateChildProcessCommand(cmdLine string) *exec.Cmd {
-	cmd := exec.Command(cmdLine, "-c", "/fluent-bit/etc/fluent-bit.conf")
-	cmd.Env = os.Environ()
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	return cmd
-}
-
-func restartChildProcesses() (*exec.Cmd, error) {
+func stopChildProcesses() error {
 
 	if cmd == nil {
 		logger.Error("child process is nil")
-		return nil, fmt.Errorf("invalid child processes")
+		return fmt.Errorf("invalid child processes")
 	}
 
-	logger.Info("current process",
+	logger.Info("sending TERM signal",
 		zap.Int("pid", cmd.Process.Pid))
 
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		return nil, err
+		return err
 	}
 
-	return generateChildProcessCommand(cmdLine), nil
+	return nil
 
 }
