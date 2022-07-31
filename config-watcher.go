@@ -124,10 +124,7 @@ func main() {
 	currentHash := <-hash
 
 	//Shall start the processes and maintain the PID
-	cmd = exec.Command(cmdLine, "-c", "/fluent-bit/etc/fluent-bit.conf")
-	cmd.Env = os.Environ()
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
+	cmd = initChildProcess()
 	if err = cmd.Start(); err != nil {
 		logger.Error(err.Error())
 		os.Exit(-1)
@@ -155,17 +152,27 @@ func main() {
 				if err = stopChildProcesses(); err != nil {
 					logger.Error(err.Error())
 				} else {
+					cmd = initChildProcess()
 					if err = cmd.Start(); err != nil {
 						logger.Error(err.Error())
+					} else {
+						logger.Info("process started",
+							zap.Int("pid", cmd.Process.Pid))
 					}
 				}
-				logger.Info("process started",
-					zap.Int("pid", cmd.Process.Pid))
 				metrics.ProcssesRestarts()
 			}
 		}
 	}
 
+}
+
+func initChildProcess() *exec.Cmd {
+	cmd = exec.Command(cmdLine, "-c", "/fluent-bit/etc/fluent-bit.conf")
+	cmd.Env = os.Environ()
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	return cmd
 }
 
 func stopChildProcesses() error {
