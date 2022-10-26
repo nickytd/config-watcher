@@ -5,16 +5,17 @@ import (
 	"config-watcher/watcher"
 	"context"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/spf13/cobra"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
@@ -168,7 +169,7 @@ func main() {
 }
 
 func initChildProcess() *exec.Cmd {
-	cmd = exec.Command(cmdLine, "-c", "/fluent-bit/etc/fluent-bit.conf")
+	cmd = exec.Command(cmdLine, "-c", "/fluent-bit/etc/fluent-bit.conf", "-w", "/fluent-bit/etc/")
 	cmd.Env = os.Environ()
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
